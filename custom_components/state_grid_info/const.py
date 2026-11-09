@@ -27,6 +27,7 @@ BILLING_STANDARD_MONTH_阶梯_峰平谷_变动阶梯 = "month_ladder_fpg_variabl
 BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格 = "month_ladder_fpg_variable"
 BILLING_STANDARD_MONTH_阶梯_峰平谷 = "month_ladder_fpg"
 BILLING_STANDARD_MONTH_阶梯 = "month_ladder"
+BILLING_STANDARD_MONTH_纯峰谷 = "month_peak_valley"
 BILLING_STANDARD_OTHER_平均单价 = "other_average"
 
 BILLING_STANDARD_OPTIONS = [
@@ -36,6 +37,7 @@ BILLING_STANDARD_OPTIONS = [
     BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格,
     BILLING_STANDARD_MONTH_阶梯_峰平谷,
     BILLING_STANDARD_MONTH_阶梯,
+    BILLING_STANDARD_MONTH_纯峰谷,
     BILLING_STANDARD_OTHER_平均单价,
 ]
 
@@ -46,6 +48,7 @@ BILLING_STANDARD_NAMES = {
     BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格: "月阶梯峰平谷变动价格计费",
     BILLING_STANDARD_MONTH_阶梯_峰平谷: "月阶梯峰平谷计费",
     BILLING_STANDARD_MONTH_阶梯: "月阶梯计费",
+    BILLING_STANDARD_MONTH_纯峰谷: "月纯峰谷计费",
     BILLING_STANDARD_OTHER_平均单价: "平均单价计费",
 }
 

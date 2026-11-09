@@ -1,3 +1,12 @@
+> **本仓库是 [xiaoshi930/state_grid_info](https://github.com/xiaoshi930/state_grid_info) 的 Fork（维护者：shinnaluo）。**
+> 在官方 5.1 基础上加入「月纯峰谷计费」（尖 / 峰 / 平 / 谷四段单价、无阶梯）及相关实体属性，
+> 目的是让本地定制不再被 HACS 更新覆盖。完整改动清单、安装方式与上游同步方法见 [CUSTOM_CHANGES.md](CUSTOM_CHANGES.md)。
+> HACS 自定义存储库请填 `https://github.com/shinnaluo/state_grid_info`（类别：集成）。
+>
+> **若你装的是上游原仓库，请勿与本项目同时启用（domain 相同）。**
+
+---
+
 ## 前端卡片统一迁移到项目：https://github.com/xiaoshi930/xiaoshi
 ## 安装步骤
 ### 数据持久化存储在state_grid_info_xxxxxxxx.json文件

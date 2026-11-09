@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    BILLING_STANDARD_MONTH_纯峰谷,
     BILLING_STANDARD_MONTH_阶梯,
     BILLING_STANDARD_MONTH_阶梯_峰平谷,
     BILLING_STANDARD_MONTH_阶梯_峰平谷_变动阶梯,
@@ -676,6 +677,7 @@ class StateGridInfoCoordinator(DataUpdateCoordinator):
             BILLING_STANDARD_MONTH_阶梯_峰平谷: "月阶梯峰平谷",
             BILLING_STANDARD_MONTH_阶梯_峰平谷_变动阶梯: "月阶梯峰平谷变动阶梯",
             BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格: "月阶梯峰平谷变动价格",
+            BILLING_STANDARD_MONTH_纯峰谷: "月纯峰谷",
             BILLING_STANDARD_OTHER_平均单价: "平均单价",
         }
         return billing_standard_map.get(billing_standard, billing_standard)
@@ -825,6 +827,13 @@ class StateGridInfoCoordinator(DataUpdateCoordinator):
 
             return attrs
 
+        if billing_standard == BILLING_STANDARD_MONTH_纯峰谷:
+            attrs["尖电价"] = self.config.get(CONF_PRICE_TIP, 0.0)
+            attrs["峰电价"] = self.config.get(CONF_PRICE_PEAK, 0.0)
+            attrs["平电价"] = self.config.get(CONF_PRICE_FLAT, 0.0)
+            attrs["谷电价"] = self.config.get(CONF_PRICE_VALLEY, 0.0)
+            return attrs
+
         if billing_standard == BILLING_STANDARD_OTHER_平均单价:
             attrs["平均单价"] = self.config.get(CONF_AVERAGE_PRICE, 0.6)
 
@@ -869,9 +878,27 @@ class StateGridInfoCoordinator(DataUpdateCoordinator):
             )
         if standard == BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格:
             return await self._async_calculate_tiered_cost(day_data, yearly=False, tou=True, variable_valley=True)
+        if standard == BILLING_STANDARD_MONTH_纯峰谷:
+            return self._calculate_flat_tou_cost(day_data)
         if standard == BILLING_STANDARD_OTHER_平均单价:
             return day_ele_num * float(self.config.get(CONF_AVERAGE_PRICE, 0.6))
         return 0.0
+
+    def _calculate_flat_tou_cost(self, day_data: dict[str, Any]) -> float:
+        """月纯峰谷：无阶梯，直接按尖/峰/平/谷单价结算。"""
+        prices = {
+            CONF_PRICE_TIP: float(self.config.get(CONF_PRICE_TIP, 0.0)),
+            CONF_PRICE_PEAK: float(self.config.get(CONF_PRICE_PEAK, 0.0)),
+            CONF_PRICE_FLAT: float(self.config.get(CONF_PRICE_FLAT, 0.0)),
+            CONF_PRICE_VALLEY: float(self.config.get(CONF_PRICE_VALLEY, 0.0)),
+        }
+        usages = {
+            CONF_PRICE_TIP: float(day_data.get("dayTPq", 0)),
+            CONF_PRICE_PEAK: float(day_data.get("dayPPq", 0)),
+            CONF_PRICE_FLAT: float(day_data.get("dayNPq", 0)),
+            CONF_PRICE_VALLEY: float(day_data.get("dayVPq", 0)),
+        }
+        return sum(usages[key] * prices[key] for key in prices)
 
     async def _async_calculate_tiered_cost(
         self,
@@ -1181,21 +1208,157 @@ class StateGridInfoCoordinator(DataUpdateCoordinator):
         return [item for item in records if isinstance(item, dict)]
 
     def _fetch_hassbox_user_data(self) -> dict[str, Any]:
-        """Read local HassBox cache file and return selected power user data."""
+        """Read local HassBox cache file and return selected power user data.
+
+        优先读取 state_grid App 集成的运行时数据（始终最新），磁盘缓存仅作回退。
+        """
+        live = self._fetch_state_grid_runtime_user_data()
+        if live:
+            return live
         return self._fetch_power_user_data("state_grid.config")
 
     def _fetch_app_user_data(self) -> dict[str, Any]:
         """读取网上国网 App 数据源的用户数据。
 
-        优先读取 state_grid_app 集成运行时的内存数据
-        （``hass.data["state_grid_app"].get_door_account()``），它始终最新且包含
-        充值记录；若内存数据不可用（未加载 / 版本不匹配），回退到磁盘
-        ``.storage/state_grid_app.config``。
+        优先读取 state_grid App 集成运行时的内存数据，它始终最新且包含
+        充值记录；若内存数据不可用（未加载 / 版本不匹配），回退到磁盘。
         """
+        live = self._fetch_state_grid_runtime_user_data()
+        if live:
+            return live
         live = self._fetch_app_user_data_from_memory()
         if live:
             return live
         return self._fetch_power_user_data("state_grid_app.config")
+
+    def _fetch_state_grid_runtime_user_data(self) -> dict[str, Any]:
+        """从 state_grid（网上国网 App）集成的运行时数据构造 user_data。
+
+        新版 state_grid 集成不再把 daily_bill_list 写进 .storage/state_grid.config，
+        hassbox / state_grid_app 磁盘路径会读到过期数据（当月字段恒为 0）。
+        这里直接读 ``hass.data["state_grid"]`` 的 AccountUsage 并转换成
+        归一化所需结构。
+        """
+        try:
+            domain_data = self.hass.data.get("state_grid")
+            if not isinstance(domain_data, dict) or not domain_data:
+                return {}
+
+            cons_no = str(self.config.get(CONF_CONSUMER_NUMBER) or "")
+            consumer_index = int(self.config.get(CONF_CONSUMER_NUMBER_INDEX, 0) or 0)
+
+            usages: list[Any] = []
+            for entry_data in domain_data.values():
+                coordinator = getattr(entry_data, "coordinator", None)
+                if coordinator is None or not coordinator.data:
+                    continue
+                usages.extend(coordinator.data.values())
+            if not usages:
+                return {}
+
+            target = None
+            for usage in usages:
+                account = usage.account
+                if cons_no and cons_no in (account.cons_no_src, account.cons_no):
+                    target = usage
+                    break
+            if target is None and 0 <= consumer_index < len(usages):
+                target = usages[consumer_index]
+            if target is None:
+                return {}
+
+            return self._convert_account_usage_to_user_data(target)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("读取 state_grid 运行时数据失败，回退磁盘: %s", exc)
+            return {}
+
+    @staticmethod
+    def _convert_account_usage_to_user_data(usage: Any) -> dict[str, Any]:
+        """把 state_grid 的 AccountUsage 转成 hassbox 归一化所需的数据结构。"""
+        daily_bill_list: list[dict[str, Any]] = []
+        for reading in usage.all_readings:
+            if reading.day is None:
+                continue
+            daily_bill_list.append(
+                {
+                    "day": reading.day.strftime("%Y%m%d"),
+                    "dayElePq": reading.usage or 0,
+                    "thisTPq": reading.tip or 0,
+                    "thisPPq": reading.peak or 0,
+                    "thisNPq": reading.flat or 0,
+                    "thisVPq": reading.valley or 0,
+                    "thisAmt": reading.charge,
+                }
+            )
+        # 最新在前，与磁盘缓存口径一致
+        daily_bill_list.sort(key=lambda item: item["day"], reverse=True)
+
+        readings_by_month: dict[tuple[int, int], list[Any]] = {}
+        for reading in usage.all_readings:
+            if reading.day is None:
+                continue
+            readings_by_month.setdefault((reading.day.year, reading.day.month), []).append(reading)
+
+        month_bill_list: list[dict[str, Any]] = []
+        for bill in usage.monthly_bills:
+            month_readings = readings_by_month.get((bill.month.year, bill.month.month), [])
+            month_bill_list.append(
+                {
+                    "month": bill.month.strftime("%Y%m"),
+                    "monthEleNum": bill.usage or 0,
+                    "monthEleCost": bill.charge or 0,
+                    "month_t_ele_num": sum(r.tip or 0 for r in month_readings),
+                    "month_p_ele_num": sum(r.peak or 0 for r in month_readings),
+                    "month_n_ele_num": sum(r.flat or 0 for r in month_readings),
+                    "month_v_ele_num": sum(r.valley or 0 for r in month_readings),
+                }
+            )
+
+        # 未结算的当月：官方月账单没有，但从日读数可累计
+        if usage.as_of is not None:
+            current_key = (usage.as_of.year, usage.as_of.month)
+            current_month_raw = usage.as_of.strftime("%Y%m")
+            if not any(b["month"] == current_month_raw for b in month_bill_list):
+                current_readings = readings_by_month.get(current_key, [])
+                if current_readings:
+                    month_bill_list.append(
+                        {
+                            "month": usage.as_of.strftime("%Y%m"),
+                            "monthEleNum": usage.current_month_total
+                            or sum(r.usage or 0 for r in current_readings),
+                            "monthEleCost": 0,
+                            "month_t_ele_num": sum(r.tip or 0 for r in current_readings),
+                            "month_p_ele_num": sum(r.peak or 0 for r in current_readings),
+                            "month_n_ele_num": sum(r.flat or 0 for r in current_readings),
+                            "month_v_ele_num": sum(r.valley or 0 for r in current_readings),
+                            "daily_ele": [
+                                {
+                                    "day": r.day.strftime("%Y%m%d"),
+                                    "dayElePq": r.usage or 0,
+                                    "thisTPq": r.tip or 0,
+                                    "thisPPq": r.peak or 0,
+                                    "thisNPq": r.flat or 0,
+                                    "thisVPq": r.valley or 0,
+                                }
+                                for r in current_readings
+                                if r.day is not None
+                            ],
+                        }
+                    )
+        month_bill_list.sort(key=lambda item: item["month"], reverse=True)
+
+        balance = 0.0
+        if usage.billing_account is not None:
+            balance = usage.billing_account.balance or 0.0
+
+        return {
+            "consName_dst": usage.account.name,
+            "balance": balance,
+            "refresh_time": usage.refreshed_at.isoformat(),
+            "daily_bill_list": daily_bill_list,
+            "month_bill_list": month_bill_list,
+            "recharge_list": [],
+        }
 
     def _fetch_app_user_data_from_memory(self) -> dict[str, Any]:
         """从 state_grid_app 集成运行时的内存数据中取指定户号的原始字典。"""

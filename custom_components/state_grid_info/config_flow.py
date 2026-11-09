@@ -18,7 +18,8 @@ from .const import (
     BILLING_STANDARD_YEAR_阶梯, BILLING_STANDARD_YEAR_阶梯_峰平谷,
     BILLING_STANDARD_MONTH_阶梯, BILLING_STANDARD_MONTH_阶梯_峰平谷,
     BILLING_STANDARD_MONTH_阶梯_峰平谷_变动阶梯,
-    BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格, BILLING_STANDARD_OTHER_平均单价,
+    BILLING_STANDARD_MONTH_阶梯_峰平谷_变动价格,
+    BILLING_STANDARD_MONTH_纯峰谷, BILLING_STANDARD_OTHER_平均单价,
     CONF_DATA_SOURCE, CONF_BILLING_STANDARD,
     CONF_CONSUMER_NUMBER, CONF_CONSUMER_NUMBER_INDEX, CONF_CONSUMER_NAME,
     CONF_MQTT_HOST, CONF_MQTT_PORT, CONF_MQTT_USERNAME, CONF_MQTT_PASSWORD, CONF_STATE_GRID_ID,
@@ -480,12 +481,21 @@ class StateGridInfoConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(f"month_12_ladder_2_valley", default=existing_data.get("month_12_ladder_2_valley", 0.3535)): cv.positive_float,
                 vol.Required(f"month_12_ladder_3_valley", default=existing_data.get("month_12_ladder_3_valley", 0.5535)): cv.positive_float,
             }
+        # 月纯峰谷（无阶梯，仅尖/峰/平/谷四段单价）
+        elif current_standard == BILLING_STANDARD_MONTH_纯峰谷:
+            schema = {
+                vol.Optional(CONF_IS_PREPAID, default=existing_data.get(CONF_IS_PREPAID, False)): cv.boolean,  # 是否预付费
+                vol.Required(CONF_PRICE_TIP, default=existing_data.get(CONF_PRICE_TIP, 0)): cv.positive_float,
+                vol.Required(CONF_PRICE_PEAK, default=existing_data.get(CONF_PRICE_PEAK, 0.5683)): cv.positive_float,
+                vol.Required(CONF_PRICE_FLAT, default=existing_data.get(CONF_PRICE_FLAT, 0)): cv.positive_float,
+                vol.Required(CONF_PRICE_VALLEY, default=existing_data.get(CONF_PRICE_VALLEY, 0.2883)): cv.positive_float,
+            }
         elif current_standard == BILLING_STANDARD_OTHER_平均单价:
             schema = {
                 vol.Optional(CONF_IS_PREPAID, default=existing_data.get(CONF_IS_PREPAID, False)): cv.boolean,  # 是否预付费
                 vol.Required(CONF_AVERAGE_PRICE, default=existing_data.get(CONF_AVERAGE_PRICE, 0.6)): cv.positive_float,
             }
-            
+
         return schema
 
 class StateGridInfoOptionsFlowHandler(config_entries.OptionsFlow):
@@ -891,12 +901,21 @@ class StateGridInfoOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(f"month_12_ladder_2_valley", default=existing_data.get("month_12_ladder_2_valley", 0.3535)): cv.positive_float,
                 vol.Required(f"month_12_ladder_3_valley", default=existing_data.get("month_12_ladder_3_valley", 0.5535)): cv.positive_float,
             }
+        # 月纯峰谷（无阶梯，仅尖/峰/平/谷四段单价）
+        elif current_standard == BILLING_STANDARD_MONTH_纯峰谷:
+            schema = {
+                vol.Optional(CONF_IS_PREPAID, default=existing_data.get(CONF_IS_PREPAID, False)): cv.boolean,
+                vol.Required(CONF_PRICE_TIP, default=existing_data.get(CONF_PRICE_TIP, 0)): cv.positive_float,
+                vol.Required(CONF_PRICE_PEAK, default=existing_data.get(CONF_PRICE_PEAK, 0.5683)): cv.positive_float,
+                vol.Required(CONF_PRICE_FLAT, default=existing_data.get(CONF_PRICE_FLAT, 0)): cv.positive_float,
+                vol.Required(CONF_PRICE_VALLEY, default=existing_data.get(CONF_PRICE_VALLEY, 0.2883)): cv.positive_float,
+            }
         elif current_standard == BILLING_STANDARD_OTHER_平均单价:
             schema = {
                 vol.Optional(CONF_IS_PREPAID, default=existing_data.get(CONF_IS_PREPAID, False)): cv.boolean,
                 vol.Required(CONF_AVERAGE_PRICE, default=existing_data.get(CONF_AVERAGE_PRICE, 0.6)): cv.positive_float,
             }
-            
+
         return schema
 
 
